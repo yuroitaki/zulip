@@ -61,6 +61,7 @@ from zerver.lib.timestamp import datetime_to_timestamp, timestamp_to_datetime
 from zerver.lib.users import is_2fa_verified
 from zerver.lib.utils import has_api_key_format, statsd
 from zerver.models import UserProfile, get_client, get_user_profile_by_api_key
+from zerver.lib.profile import profile
 
 if TYPE_CHECKING:
     from django.http.request import _ImmutableQueryDict
@@ -199,6 +200,7 @@ def require_billing_access(
     return wrapper
 
 
+@profile
 def process_client(
     request: HttpRequest,
     user: Union[UserProfile, AnonymousUser, None] = None,
@@ -857,10 +859,12 @@ def public_json_view(
 # Checks if the user is logged in.  If not, return an error (the
 # @login_required behavior of redirecting to a login page doesn't make
 # sense for json views)
+@profile
 def authenticated_json_view(
     view_func: Callable[Concatenate[HttpRequest, UserProfile, ParamT], HttpResponse],
     skip_rate_limiting: bool = False,
 ) -> Callable[Concatenate[HttpRequest, ParamT], HttpResponse]:
+    @profile
     @wraps(view_func)
     def _wrapped_view_func(
         request: HttpRequest,

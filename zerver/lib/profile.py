@@ -8,6 +8,19 @@ ParamT = ParamSpec("ParamT")
 ReturnT = TypeVar("ReturnT")
 
 
+import line_profiler
+profile = line_profiler.LineProfiler()
+import atexit
+
+def print_and_dump():
+    profile.print_stats()
+    profile.dump_stats('data.stats')
+
+from django.conf import settings
+if settings.RUNNING_INSIDE_TORNADO:
+    atexit.register(print_and_dump)
+
+
 def profiled(func: Callable[ParamT, ReturnT]) -> Callable[ParamT, ReturnT]:
     """
     This decorator should obviously be used only in a dev environment.
