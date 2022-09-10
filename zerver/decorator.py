@@ -1,13 +1,17 @@
 import base64
 import datetime
 import logging
+import time
 import urllib
 from functools import wraps
 from io import BytesIO
+from threading import Lock, Thread
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Dict,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -52,6 +56,7 @@ from zerver.lib.exceptions import (
     UserDeactivatedError,
     WebhookError,
 )
+from zerver.lib.profile import profile
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.rate_limiter import is_local_addr, rate_limit_request_by_ip, rate_limit_user
 from zerver.lib.request import REQ, RequestNotes, has_request_variables
@@ -61,7 +66,6 @@ from zerver.lib.timestamp import datetime_to_timestamp, timestamp_to_datetime
 from zerver.lib.users import is_2fa_verified
 from zerver.lib.utils import has_api_key_format, statsd
 from zerver.models import UserProfile, get_client, get_user_profile_by_api_key
-from zerver.lib.profile import profile
 
 if TYPE_CHECKING:
     from django.http.request import _ImmutableQueryDict
@@ -72,6 +76,9 @@ webhook_anomalous_payloads_logger = logging.getLogger("zulip.zerver.webhooks.ano
 
 ParamT = ParamSpec("ParamT")
 ReturnT = TypeVar("ReturnT")
+
+user_activity_events: List[Dict[str, Any]] = []
+user_activity_events_lock = Lock()
 
 
 def update_user_activity(
@@ -97,7 +104,26 @@ def update_user_activity(
         "time": datetime_to_timestamp(timezone_now()),
         "client_id": request_notes.client.id,
     }
-    queue_json_publish("user_activity", event, lambda event: None)
+    # queue_json_publish("user_activity", event, lambda event: None)
+    with user_activity_events_lock:
+        if len(user_activity_events) == 0:
+            logging.info(f"Adding event and spawning new thread: {event}")
+            user_activity_events.append(event)
+            Thread(target=publish_user_activity_to_queue, args=(event,)).start()
+        else:
+            logging.info(f"Adding event: {event} to events: {user_activity_events}")
+            user_activity_events.append(event)
+
+
+def publish_user_activity_to_queue(event: Dict[str, Any]) -> None:
+    logging.info("Sleeping for 5 seconds")
+    time.sleep(5)
+    with user_activity_events_lock:
+        logging.info(f"Publishing events to queue: {user_activity_events}")
+        for event in user_activity_events:
+            queue_json_publish("user_activity", event, lambda event: None)
+        logging.info("Clearing events")
+        user_activity_events.clear()
 
 
 # Based on django.views.decorators.http.require_http_methods
@@ -752,6 +778,9 @@ def authenticated_rest_api_view(
                     api_key,
                     allow_webhook_access=allow_webhook_access,
                     client_name=full_webhook_client_name(webhook_client_name),
+                )
+                process_client(
+                    request, user_profile, is_browser_view=True, query=view_func.__name__
                 )
             except JsonableError as e:
                 raise UnauthorizedError(e.msg)

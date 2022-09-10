@@ -12,7 +12,7 @@ import line_profiler
 profile = line_profiler.LineProfiler()
 import atexit
 
-def print_and_dump():
+def print_and_dump() -> None:
     profile.print_stats()
     profile.dump_stats('data.stats')
 
